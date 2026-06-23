@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة التحليل القانوني — مستكشف الرسم البياني</title>
+    <meta name="description" content="استكشف قوانين ضريبة الدخل والمواد والأحكام القضائية في رسم بياني تفاعلي">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-logo">
+            <span class="logo-accent">Legal</span>Graph AI
+        </div>
+        <div class="header-actions">
+            <button id="btn-ingest" class="btn btn-primary">قراءة المستندات وإعادة البناء</button>
+        </div>
+    </header>
+
+    <main class="app-layout">
+        <!-- Sidebar Panel for Details -->
+        <section class="side-panel">
+            <div class="glass-card detail-card">
+                <h2>تفاصيل العنصر المحدد</h2>
+
+                <div id="detail-fallback" class="detail-placeholder">
+                    <div>
+                        <p>اضغط على أي عقدة في الرسم البياني لعرض تفاصيلها هنا.</p>
+                        <br>
+                        <p class="hint-tree">💡 <strong>كيفية الاستخدام:</strong><br>
+                            القانون ← نسخة ← مادة ← فقرة ← حكم<br>
+                            اضغط على أي نود لفتح مستواه التالي
+                        </p>
+                    </div>
+                </div>
+
+                <div id="detail-content" class="hidden">
+                    <div class="node-badge" id="detail-type">مادة قانونية</div>
+                    <h3 id="detail-title">العنوان</h3>
+                    <p id="expand-hint" class="expand-hint hidden"></p>
+                    <div class="detail-body">
+                        <label>المحتوى النصي:</label>
+                        <p id="detail-text" class="text-content"></p>
+                    </div>
+                    <div class="detail-meta">
+                        <label>البيانات التعريفية:</label>
+                        <pre id="detail-meta-json"></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Graph Viewport -->
+        <section class="graph-container">
+            <div id="cy" class="graph-canvas"></div>
+
+            <!-- Legend -->
+            <div class="graph-legend">
+                <div class="legend-title">دليل الألوان</div>
+                <span class="legend-item"><span class="legend-color law"></span>قانون</span>
+                <span class="legend-item"><span class="legend-color law-version"></span>نسخة القانون</span>
+                <span class="legend-item"><span class="legend-color article"></span>مادة قانونية</span>
+                <span class="legend-item"><span class="legend-color paragraph"></span>فقرة فرعية</span>
+                <span class="legend-item"><span class="legend-color item"></span>بند فرعي</span>
+                <span class="legend-item"><span class="legend-color judgment"></span>حكم قضائي</span>
+            </div>
+        </section>
+    </main>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
