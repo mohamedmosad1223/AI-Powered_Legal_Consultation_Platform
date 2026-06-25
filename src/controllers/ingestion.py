@@ -9,8 +9,12 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 class IngestionController:
-    def __init__(self, data_dir=r"d:\Work\AI-Powered_Legal_Consultation_Platform\data"):
-        self.data_dir = data_dir
+    def __init__(self, data_dir=None):
+        if data_dir is None:
+            # Point to the data directory in the project root
+            self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data'))
+        else:
+            self.data_dir = data_dir
         self.neo4j = Neo4jModel()
 
     def run_ingestion(self):

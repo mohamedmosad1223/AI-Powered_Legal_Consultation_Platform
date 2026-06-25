@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>المستشار القانوني الذكي (RAG)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a365d;
+            --secondary: #2b6cb0;
+            --accent: #4299e1;
+            --bg: #f7fafc;
+            --surface: #ffffff;
+            --text: #2d3748;
+            --border: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Tajawal', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .header {
+            background-color: var(--primary);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            margin-left: 1.5rem;
+            font-weight: 500;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            opacity: 1;
+        }
+
+        .container {
+            flex: 1;
+            display: flex;
+            padding: 2rem;
+            gap: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .chat-section {
+            flex: 2;
+            background: var(--surface);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .chat-history {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 1rem 1.2rem;
+            border-radius: 12px;
+            line-height: 1.6;
+        }
+
+        .message.user {
+            background-color: var(--accent);
+            color: white;
+            align-self: flex-start;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot {
+            background-color: #f1f5f9;
+            color: var(--text);
+            align-self: flex-end;
+            border-bottom-left-radius: 4px;
+        }
+
+        .input-area {
+            padding: 1.5rem;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 1rem;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 1rem 1.5rem;
+            border: 2px solid var(--border);
+            border-radius: 30px;
+            font-family: inherit;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--secondary);
+        }
+
+        button {
+            background-color: var(--secondary);
+            color: white;
+            border: none;
+            padding: 0 2rem;
+            border-radius: 30px;
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+        }
+
+        button:hover {
+            background-color: var(--primary);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background-color: #cbd5e0;
+            cursor: not-allowed;
+        }
+
+        /* ── Right panel (single scrollable, sources then judgments) ── */
+        .sources-section {
+            flex: 1;
+            background: var(--surface);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            overflow-y: auto;
+        }
+
+        .panel-section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin: 0 0 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .panel-divider {
+            border: none;
+            border-top: 2px dashed var(--border);
+            margin: 1.5rem 0;
+        }
+
+        /* Judgment card */
+        .judgment-card {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+        .judgment-card:hover { box-shadow: 0 4px 12px rgba(229,62,62,0.1); }
+
+        .judgment-card-header {
+            padding: 0.9rem 1rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.5rem;
+            transition: background 0.2s;
+            user-select: none;
+        }
+        .judgment-card-header:hover { background: #fed7d7; }
+        .judgment-card.open .judgment-toggle { transform: rotate(180deg); }
+
+        .judgment-toggle {
+            font-size: 1.1rem;
+            color: #e53e3e;
+            transition: transform 0.3s;
+            flex-shrink: 0;
+        }
+
+        .judgment-card-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease;
+            border-top: 0 solid #fed7d7;
+        }
+        .judgment-card.open .judgment-card-body {
+            max-height: 700px;
+            border-top: 1px solid #fed7d7;
+        }
+
+        .judgment-meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            padding: 0.9rem 1rem;
+            background: #fff;
+            font-size: 0.82rem;
+        }
+        .judgment-meta-label { color: #718096; font-size: 0.75rem; }
+        .judgment-meta-value { font-weight: 600; color: var(--text); }
+
+        .judgment-outcome {
+            padding: 0.5rem 1rem;
+            background: #f0fff4;
+            border-top: 1px solid #c6f6d5;
+            font-size: 0.85rem;
+            color: #22543d;
+            font-weight: 600;
+        }
+
+        .judgment-fulltext {
+            padding: 0.9rem 1rem;
+            font-size: 0.82rem;
+            line-height: 1.8;
+            color: #4a5568;
+            white-space: pre-wrap;
+            background: #fff;
+            border-top: 1px solid #fed7d7;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .source-card {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+
+        .source-card-header {
+            padding: 1rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.5rem;
+            transition: background-color 0.2s;
+            user-select: none;
+        }
+
+        .source-card-header:hover {
+            background-color: #edf2f7;
+        }
+
+        .source-card-header-info { flex: 1; }
+
+        .source-toggle-icon {
+            font-size: 1.2rem;
+            color: var(--secondary);
+            transition: transform 0.3s ease;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .source-card.open .source-toggle-icon {
+            transform: rotate(180deg);
+        }
+
+        .source-card-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease, padding 0.3s ease;
+            border-top: 0px solid var(--border);
+        }
+
+        .source-card.open .source-card-body {
+            max-height: 600px;
+            border-top: 1px solid var(--border);
+        }
+
+        .source-card-text {
+            padding: 1rem;
+            font-size: 0.88rem;
+            line-height: 1.8;
+            color: #4a5568;
+            white-space: pre-wrap;
+            direction: rtl;
+            background: #fff;
+        }
+
+        .source-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.07);
+        }
+
+        .source-type {
+            font-size: 0.75rem;
+            color: white;
+            background: var(--secondary);
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 0.4rem;
+        }
+
+        .source-type.judgment { background: #e53e3e; }
+
+        /* Version & change badges */
+        .badges-row {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            margin: 0.4rem 0 0.3rem;
+        }
+
+        .badge {
+            font-size: 0.72rem;
+            padding: 0.18rem 0.55rem;
+            border-radius: 20px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge-latest   { background: #c6f6d5; color: #276749; }
+        .badge-old      { background: #e2e8f0; color: #4a5568; }
+        .badge-modified { background: #fefcbf; color: #744210; }
+        .badge-added    { background: #c6f6d5; color: #22543d; }
+        .badge-deleted  { background: #fed7d7; color: #742a2a; }
+        .badge-unchanged{ background: #e2e8f0; color: #4a5568; }
+
+        .source-title {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            font-size: 0.93rem;
+        }
+
+        .source-score {
+            font-size: 0.78rem;
+            color: #718096;
+        }
+
+        /* Diff summary bar */
+        .diff-summary {
+            font-size: 0.8rem;
+            color: #5a4a00;
+            background: #fffff0;
+            border-right: 3px solid #d69e2e;
+            padding: 0.4rem 0.7rem;
+            margin: 0.5rem 0 0;
+            border-radius: 0 4px 4px 0;
+        }
+
+        /* Diff viewer */
+        .diff-viewer {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            direction: ltr;
+            text-align: left;
+            overflow-x: auto;
+        }
+
+        .diff-line { padding: 1px 6px; }
+        .diff-line.added   { background: #f0fff4; color: #276749; }
+        .diff-line.removed { background: #fff5f5; color: #c53030; }
+        .diff-line.meta    { background: #ebf8ff; color: #2b6cb0; font-style: italic; }
+        .diff-line.context { color: #718096; }
+
+        /* Version tabs inside card body */
+        .version-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            background: #f1f5f9;
+        }
+
+        .version-tab {
+            padding: 0.5rem 1rem;
+            font-size: 0.82rem;
+            cursor: pointer;
+            border-left: 1px solid var(--border);
+            transition: background 0.2s;
+            font-weight: 500;
+        }
+
+        .version-tab:first-child { border-left: none; }
+        .version-tab:hover { background: #e2e8f0; }
+        .version-tab.active { background: #fff; color: var(--secondary); font-weight: 700; border-bottom: 2px solid var(--secondary); }
+
+        .version-pane { display: none; padding: 0.8rem 1rem; background: #fff; }
+        .version-pane.active { display: block; }
+
+        .loading {
+            display: none;
+            align-self: center;
+            color: var(--secondary);
+            font-weight: 500;
+            margin: 1rem 0;
+        }
+
+        /* Markdown styling for bot messages */
+        .message.bot p { margin-top: 0; }
+        .message.bot ul, .message.bot ol { padding-right: 1.5rem; padding-left: 0; }
+        .message.bot strong { color: var(--primary); }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+    <header class="header">
+        <h2>المستشار القانوني (الذكاء الاصطناعي)</h2>
+        <nav class="nav-links">
+            <a href="/">مستكشف القوانين (Graph)</a>
+            <a href="/rag" class="active">المستشار الذكي (RAG)</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="chat-section">
+            <div class="chat-history" id="chat-history">
+                <div class="message bot">
+                    أهلاً بك! أنا المساعد القانوني الذكي. يمكنك سؤالي عن أي استشارة تخص قانون ضريبة الدخل والأحكام المرتبطة به.
+                </div>
+            </div>
+            
+            <div class="loading" id="loading">جاري البحث وتحليل البيانات...</div>
+            
+            <div class="input-area">
+                <input type="text" id="query-input" placeholder="اكتب سؤالك القانوني هنا..." onkeypress="handleKeyPress(event)">
+                <button id="send-btn" onclick="sendQuery()">إرسال</button>
+            </div>
+        </div>
+
+        <div class="sources-section">
+            <!-- Sources -->
+            <div class="panel-section-title">📄 المصادر المرجعية</div>
+            <div id="sources-container">
+                <p style="color:#a0aec0;text-align:center;margin-top:1rem;font-size:0.9rem;">
+                    ستظهر هنا المواد التي استند إليها المساعد.
+                </p>
+            </div>
+
+            <!-- Judgments (always visible below sources) -->
+            <hr class="panel-divider" id="judgments-divider" style="display:none">
+            <div id="judgments-section" style="display:none">
+                <div class="panel-section-title">⚖️ الأحكام المرتبطة</div>
+                <div id="judgments-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configure marked for RTL and Arabic
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
+
+        async function sendQuery() {
+            const input = document.getElementById('query-input');
+            const query = input.value.trim();
+            if (!query) return;
+
+            // UI Updates
+            addMessage(query, 'user');
+            input.value = '';
+            document.getElementById('send-btn').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('sources-container').innerHTML = '';
+            document.getElementById('judgments-container').innerHTML = '';
+            document.getElementById('judgments-section').style.display = 'none';
+            document.getElementById('judgments-divider').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/rag/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    addMessage(data.data.answer, 'bot');
+                    displaySources(data.data.sources);
+                    displayJudgments(data.data.judgments);
+                } else {
+                    addMessage('حدث خطأ: ' + data.message, 'bot');
+                }
+            } catch (error) {
+                addMessage('خطأ في الاتصال بالخادم.', 'bot');
+            } finally {
+                document.getElementById('send-btn').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+                input.focus();
+            }
+        }
+
+        function addMessage(text, sender) {
+            const history = document.getElementById('chat-history');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}`;
+            
+            if (sender === 'bot') {
+                msgDiv.innerHTML = marked.parse(text);
+            } else {
+                msgDiv.textContent = text;
+            }
+            
+            history.appendChild(msgDiv);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        function displaySources(sources) {
+            const container = document.getElementById('sources-container');
+
+            if (!sources || sources.length === 0) {
+                container.innerHTML = '<p style="color:#a0aec0;text-align:center;margin-top:2rem;">لم يتم العثور على مصادر مطابقة.</p>';
+                return;
+            }
+
+            sources.forEach((source, index) => {
+                const isJudgment = source.type === 'Judgment';
+                const typeClass  = isJudgment ? 'judgment' : '';
+                const typeLabel  = isJudgment ? 'حكم قضائي' : 'مادة قانونية';
+                const vi         = source.version_info;   // version comparison object (may be null)
+
+                // ── Build badges row ─────────────────────
+                let badgesHtml = '';
+                if (vi) {
+                    const changeClass = {
+                        modified:  'badge-modified',
+                        added:     'badge-added',
+                        deleted:   'badge-deleted',
+                        unchanged: 'badge-unchanged'
+                    }[vi.change_type] || 'badge-unchanged';
+
+                    const latestLabel  = vi.latest_version_label || '';
+                    badgesHtml = `
+                        <span class="badge badge-latest">✓ ${escapeHtml(latestLabel)}</span>
+                        <span class="badge ${changeClass}">${escapeHtml(vi.change_type_label)}</span>
+                    `;
+                }
+
+                // ── Diff summary bar ─────────────────────
+                let diffSummaryHtml = '';
+                if (vi && vi.diff_summary) {
+                    diffSummaryHtml = `<div class="diff-summary">${escapeHtml(vi.diff_summary)}</div>`;
+                }
+
+                // ── Body content: version tabs or plain text ──
+                let bodyHtml = '';
+                if (vi && (vi.text_2015 || vi.text_amended)) {
+                    const has2015    = !!vi.text_2015;
+                    const hasAmended = !!vi.text_amended;
+
+                    bodyHtml = `
+                        <div class="version-tabs">
+                            ${has2015    ? `<div class="version-tab active" onclick="switchTab(${index},'tab2015',this)">نسخة 2015 (الأصلية)</div>` : ''}
+                            ${hasAmended ? `<div class="version-tab${!has2015?' active':' '}" onclick="switchTab(${index},'tabAmended',this)">النسخة المعدّلة</div>` : ''}
+                            <div class="version-tab" onclick="switchTab(${index},'tabDiff',this)">🔍 الفروقات</div>
+                        </div>
+
+                        ${has2015 ? `
+                        <div class="version-pane active" id="pane-${index}-tab2015">
+                            <div class="source-card-text">${escapeHtml(vi.text_2015)}</div>
+                        </div>` : ''}
+
+                        ${hasAmended ? `
+                        <div class="version-pane${!has2015?' active':' '}" id="pane-${index}-tabAmended">
+                            <div class="source-card-text">${escapeHtml(vi.text_amended)}</div>
+                        </div>` : ''}
+
+                        <div class="version-pane" id="pane-${index}-tabDiff">
+                            ${buildDiffHtml(vi.text_2015 || '', vi.text_amended || '')}
+                        </div>
+                    `;
+                } else {
+                    // Fallback: plain text
+                    const rawText = source.text || 'لا يوجد نص متاح.';
+                    bodyHtml = `<div class="source-card-text">${escapeHtml(rawText)}</div>`;
+                }
+
+                // ── Assemble card ───────────────────────
+                const card = document.createElement('div');
+                card.className = 'source-card';
+                card.id = `source-card-${index}`;
+                card.innerHTML = `
+                    <div class="source-card-header" onclick="toggleSource(${index})">
+                        <div class="source-card-header-info">
+                            <span class="source-type ${typeClass}">${typeLabel}</span>
+                            <div class="badges-row">${badgesHtml}</div>
+                            <div class="source-title">${escapeHtml(source.label)}</div>
+                            ${diffSummaryHtml}
+                            <div class="source-score">مدى التطابق: ${(source.score * 100).toFixed(1)}%</div>
+                        </div>
+                        <span class="source-toggle-icon">▼</span>
+                    </div>
+                    <div class="source-card-body" id="source-body-${index}">
+                        ${bodyHtml}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function toggleSource(index) {
+            const card = document.getElementById(`source-card-${index}`);
+            card.classList.toggle('open');
+        }
+
+        function switchTab(cardIndex, tabId, el) {
+            // Deactivate all tabs in this card
+            const card = document.getElementById(`source-card-${cardIndex}`);
+            card.querySelectorAll('.version-tab').forEach(t => t.classList.remove('active'));
+            card.querySelectorAll('.version-pane').forEach(p => p.classList.remove('active'));
+            // Activate clicked tab + matching pane
+            el.classList.add('active');
+            const pane = document.getElementById(`pane-${cardIndex}-${tabId}`);
+            if (pane) pane.classList.add('active');
+        }
+
+        function buildDiffHtml(text2015, textAmended) {
+            // Client-side unified diff using LCS approach
+            const lines2015    = text2015.split('\n');
+            const linesAmended = textAmended.split('\n');
+
+            // Simple Myers-style diff via diffLines helper
+            const diff = diffLines(lines2015, linesAmended);
+
+            if (!diff.length) {
+                return '<p style="color:#718096;padding:1rem;">النص متطابق في كلا الإصدارين.</p>';
+            }
+
+            let html = '<div class="diff-viewer">';
+            diff.forEach(d => {
+                if (d.type === 'added')   html += `<div class="diff-line added">+ ${escapeHtml(d.line)}</div>`;
+                else if (d.type === 'removed') html += `<div class="diff-line removed">- ${escapeHtml(d.line)}</div>`;
+                else                      html += `<div class="diff-line context">  ${escapeHtml(d.line)}</div>`;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        // Simple LCS-based line diff (no external lib needed)
+        function diffLines(a, b) {
+            const m = a.length, n = b.length;
+            // Build LCS table
+            const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
+            for (let i = m-1; i >= 0; i--)
+                for (let j = n-1; j >= 0; j--)
+                    dp[i][j] = a[i] === b[j] ? 1 + dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
+
+            const result = [];
+            let i = 0, j = 0;
+            while (i < m || j < n) {
+                if (i < m && j < n && a[i] === b[j]) {
+                    result.push({type: 'context', line: a[i++]}); j++;
+                } else if (j < n && (i >= m || dp[i+1][j] >= dp[i][j+1])) {
+                    result.push({type: 'added', line: b[j++]});
+                } else {
+                    result.push({type: 'removed', line: a[i++]});
+                }
+            }
+            return result;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(text || ''));
+            return div.innerHTML;
+        }
+
+        function displayJudgments(judgments) {
+            const container = document.getElementById('judgments-container');
+            const section   = document.getElementById('judgments-section');
+            const divider   = document.getElementById('judgments-divider');
+
+            if (!judgments || judgments.length === 0) {
+                return; // nothing to show — section stays hidden
+            }
+
+            // Show the judgments section
+            divider.style.display = 'block';
+            section.style.display = 'block';
+
+            judgments.forEach((j, idx) => {
+                const cardId = `judgment-card-${idx}`;
+                const card   = document.createElement('div');
+                card.className = 'judgment-card';
+                card.id = cardId;
+
+                const title   = escapeHtml(j.title || `حكم رقم ${j.case_number || ''}`);
+                const court   = escapeHtml(j.court   || '—');
+                const date    = escapeHtml(j.date    || '—');
+                const year    = escapeHtml(String(j.ruling_year  || '—'));
+                const num     = escapeHtml(String(j.ruling_number || '—'));
+                const outcome = escapeHtml(j.outcome  || '—');
+                const subject = escapeHtml(j.subject  || '');
+                const fullTxt = escapeHtml(j.full_text || 'النص الكامل غير متوفر.');
+
+                card.innerHTML = `
+                    <div class="judgment-card-header" onclick="toggleJudgment('${cardId}')">
+                        <div style="flex:1">
+                            <span class="source-type judgment">حكم قضائي</span>
+                            <div class="source-title" style="margin-top:0.4rem;">${title}</div>
+                            ${subject ? `<div style="font-size:0.8rem;color:#718096;margin-top:0.3rem;">${subject}</div>` : ''}
+                        </div>
+                        <span class="judgment-toggle">▼</span>
+                    </div>
+                    <div class="judgment-card-body">
+                        <div class="judgment-meta-grid">
+                            <div class="judgment-meta-item">
+                                <div class="judgment-meta-label">المحكمة</div>
+                                <div class="judgment-meta-value">${court}</div>
+                            </div>
+                            <div class="judgment-meta-item">
+                                <div class="judgment-meta-label">التاريخ</div>
+                                <div class="judgment-meta-value">${date}</div>
+                            </div>
+                            <div class="judgment-meta-item">
+                                <div class="judgment-meta-label">رقم الحكم</div>
+                                <div class="judgment-meta-value">${num}</div>
+                            </div>
+                            <div class="judgment-meta-item">
+                                <div class="judgment-meta-label">سنة الحكم</div>
+                                <div class="judgment-meta-value">${year}</div>
+                            </div>
+                        </div>
+                        <div class="judgment-outcome">✅ النتيجة: ${outcome}</div>
+                        <div class="judgment-fulltext">${fullTxt}</div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function toggleJudgment(cardId) {
+            const card = document.getElementById(cardId);
+            card.classList.toggle('open');
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendQuery();
+            }
+        }
+    </script>
+</body>
+</html>

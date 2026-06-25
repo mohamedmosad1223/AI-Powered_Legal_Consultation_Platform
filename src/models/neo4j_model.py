@@ -566,3 +566,79 @@ class Neo4jModel:
         """Wipes the database for clean ingestion."""
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")
+
+    # ──────────────────────────────────────────────
+    # VERSION COMPARISON
+    # ──────────────────────────────────────────────
+
+    def get_article_version(self, version_id: str) -> dict | None:
+        """
+        Returns a single ArticleVersion dict (id, number, text, version_name, law_version_id).
+        Returns None if not found.
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                "MATCH (av:ArticleVersion {version_id: $vid}) RETURN av",
+                vid=version_id
+            ).single()
+            if result:
+                props = dict(result["av"])
+                return props
+        return None
+
+    def get_judgments_for_article(self, law_id: str, article_number: int) -> list[dict]:
+        """
+        Returns all Judgment nodes (with full details) that CITES any node
+        (ArticleVersion, Paragraph, or Item) belonging to the given article
+        across both law versions (2015 and amended).
+
+        Returns a list of dicts with keys:
+          ruling_id, case_number, ruling_number, ruling_year,
+          court, court_type, date, outcome, subject, title, full_text
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (j:Judgment)-[:CITES]->(n)
+                WHERE (
+                    (n:ArticleVersion AND n.version_id STARTS WITH $prefix)
+                    OR
+                    (n:Paragraph AND n.paragraph_id STARTS WITH $prefix)
+                    OR
+                    (n:Item AND n.item_id STARTS WITH $prefix)
+                )
+                RETURN DISTINCT j
+                ORDER BY j.ruling_year, j.ruling_number
+                """,
+                prefix=f"{law_id}_art_{article_number}_v_"
+            )
+            judgments = []
+            for rec in result:
+                props = dict(rec["j"])
+                judgments.append(props)
+        return judgments
+
+    def get_all_versions_of_article(self, law_id: str, article_number: int) -> list[dict]:
+        """
+        Returns all ArticleVersion nodes for a given law and article number,
+        across all versions (2015, amended, etc.).
+        Each dict has: version_id, number, text, effective_from, law_version_id, version_name
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (lv:LawVersion)-[:HAS_ARTICLE]->(av:ArticleVersion)
+                WHERE lv.law_id = $law_id AND av.number = $art_num
+                RETURN av, lv.version_name AS ver_name
+                ORDER BY lv.version_name
+                """,
+                law_id=law_id,
+                art_num=article_number
+            )
+            versions = []
+            for rec in result:
+                props = dict(rec["av"])
+                props["version_name"] = rec["ver_name"]
+                versions.append(props)
+        return versions
+
