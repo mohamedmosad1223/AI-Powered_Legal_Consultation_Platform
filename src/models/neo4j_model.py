@@ -1,3 +1,4 @@
+from typing import Optional, Union
 from neo4j import GraphDatabase
 
 
@@ -571,7 +572,7 @@ class Neo4jModel:
     # VERSION COMPARISON
     # ──────────────────────────────────────────────
 
-    def get_article_version(self, version_id: str) -> dict | None:
+    def get_article_version(self, version_id: str) -> Optional[dict]:
         """
         Returns a single ArticleVersion dict (id, number, text, version_name, law_version_id).
         Returns None if not found.
@@ -594,12 +595,12 @@ class Neo4jModel:
 
         Returns a list of dicts with keys:
           ruling_id, case_number, ruling_number, ruling_year,
-          court, court_type, date, outcome, subject, title, full_text
+          court, court_type, date, outcome, subject, title, full_text, citation_text
         """
         with self.driver.session() as session:
             result = session.run(
                 """
-                MATCH (j:Judgment)-[:CITES]->(n)
+                MATCH (j:Judgment)-[r:CITES]->(n)
                 WHERE (
                     (n:ArticleVersion AND n.version_id STARTS WITH $prefix)
                     OR
@@ -607,7 +608,7 @@ class Neo4jModel:
                     OR
                     (n:Item AND n.item_id STARTS WITH $prefix)
                 )
-                RETURN DISTINCT j
+                RETURN j, r.citation_text AS citation_text
                 ORDER BY j.ruling_year, j.ruling_number
                 """,
                 prefix=f"{law_id}_art_{article_number}_v_"
@@ -615,7 +616,17 @@ class Neo4jModel:
             judgments = []
             for rec in result:
                 props = dict(rec["j"])
-                judgments.append(props)
+                rid = props.get("ruling_id")
+                citation = rec["citation_text"] or ""
+                
+                # If we've already seen this judgment, we can append new citation texts to it
+                existing = next((item for item in judgments if item["ruling_id"] == rid), None)
+                if existing:
+                    if citation and citation not in existing["citation_text"]:
+                        existing["citation_text"] += "\n" + citation
+                else:
+                    props["citation_text"] = citation
+                    judgments.append(props)
         return judgments
 
     def get_all_versions_of_article(self, law_id: str, article_number: int) -> list[dict]:

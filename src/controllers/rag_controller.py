@@ -1,3 +1,4 @@
+from typing import Optional, Union
 import difflib
 import re
 from src.models.embeddings_model import EmbeddingsModel
@@ -102,7 +103,7 @@ class RAGController:
             "diff_lines": diff
         }
 
-    def _get_version_info_for_article(self, source_id: str) -> dict | None:
+    def _get_version_info_for_article(self, source_id: str) -> Optional[dict]:
         """
         Given a source_id (ArticleVersion), fetches both versions from Neo4j
         and returns a full comparison object.
@@ -276,16 +277,45 @@ class RAGController:
             if context_docs:
                 context_docs[-1]["text"] += judgments_context
 
-        # 5. Generate Answer
+        # 5. Generate Answer & Evaluate Judgments
+        # Limit to top 2 judgments to avoid token limit errors on free tier API
+        all_judgments = all_judgments[:2]
         print(f"\n[الخطوة 5] إرسال {len(context_docs)} مصادر + {len(all_judgments)} حكم إلى Groq LLM...")
-        answer = self.llm.generate_response(user_question, context_docs)
+        
+        filtered_judgments = []
+        if all_judgments:
+            try:
+                response_data = self.llm.generate_rag_response(user_question, context_docs, all_judgments)
+                answer = response_data.get("answer", "")
+                
+                # Match evaluations with judgments and filter relevant ones
+                eval_dict = {}
+                for item in response_data.get("judgments_relevance", []):
+                    rid = item.get("ruling_id")
+                    if rid:
+                        eval_dict[str(rid).strip().upper()] = item
+                
+                for idx, j in enumerate(all_judgments, 1):
+                    rid_key = f"J{idx}"
+                    evaluation = eval_dict.get(rid_key)
+                    if evaluation and evaluation.get("is_relevant", False):
+                        j["relevance_explanation"] = evaluation.get("relevance_explanation", "")
+                        filtered_judgments.append(j)
+            except Exception as e:
+                print(f"❌ خطأ في معالجة RAG الذكية للأحكام: {e}")
+                # Fallback to normal response and all judgments if RAG analysis fails
+                answer = self.llm.generate_response(user_question, context_docs)
+                filtered_judgments = all_judgments
+        else:
+            answer = self.llm.generate_response(user_question, context_docs)
+            
         print("✅ تم استلام الإجابة من Groq.")
         print("="*50 + "\n")
 
         return {
             "answer":    answer,
             "sources":   source_references,
-            "judgments": all_judgments,      # <-- new: full judgment objects
+            "judgments": filtered_judgments,
         }
 
     def _get_connected_judgments(self, article_version_id: str) -> str:

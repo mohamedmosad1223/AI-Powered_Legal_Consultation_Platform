@@ -4,6 +4,6 @@ python-docx==1.1.0
 neo4j==5.18.0
 jinja2==3.1.3
 qdrant-client
-groq
+openai
 cohere
 python-dotenv

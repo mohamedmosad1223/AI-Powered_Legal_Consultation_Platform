@@ -1,3 +1,4 @@
+from typing import Optional, Union
 import os
 import re
 import docx
@@ -105,8 +106,8 @@ class DocxParser:
 
         # ── Walk through paragraphs and build article list ───────────────────
         articles: list[dict] = []
-        current_article: dict | None = None
-        current_paragraph: dict | None = None
+        current_article: Optional[dict] = None
+        current_paragraph: Optional[dict] = None
 
         # Helper to iterate through paragraphs and tables in document order
         from docx.text.paragraph import Paragraph
