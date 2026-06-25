@@ -175,62 +175,116 @@ class Neo4jModel:
 
     def insert_judgment(self, judgment_data):
         """
-        Inserts a Judgment node and links CITES relations
-        to ArticleVersion (when no paragraph) or Paragraph.
+        Inserts a Judgment node and creates CITES edges to the
+        most-specific node available: Item > Paragraph > ArticleVersion.
         """
         with self.driver.session() as session:
+            # ── Judgment node ─────────────────────────────────────────────
             session.run(
                 """
                 MERGE (j:Judgment {ruling_id: $ruling_id})
-                SET j.case_number = $case_number,
-                    j.court       = $court,
-                    j.date        = $date,
-                    j.title       = $title,
-                    j.full_text   = $full_text
+                SET j.case_number    = $case_number,
+                    j.ruling_number  = $ruling_number,
+                    j.ruling_year    = $ruling_year,
+                    j.court          = $court,
+                    j.court_type     = $court_type,
+                    j.date           = $date,
+                    j.outcome        = $outcome,
+                    j.subject        = $subject,
+                    j.title          = $title,
+                    j.full_text      = $full_text
                 """,
                 ruling_id=judgment_data["ruling_id"],
                 case_number=judgment_data["case_number"],
+                ruling_number=judgment_data.get("ruling_number", 0),
+                ruling_year=judgment_data.get("ruling_year", 0),
                 court=judgment_data["court"],
+                court_type=judgment_data.get("court_type", "tax_first"),
                 date=judgment_data["date"],
+                outcome=judgment_data.get("outcome", ""),
+                subject=judgment_data.get("subject", ""),
                 title=judgment_data["title"],
                 full_text=judgment_data["full_text"],
             )
 
             for cit in judgment_data["citations"]:
-                law_id = f"law_{cit['law_number']}_{cit['law_year']}"
+                law_num  = cit["law_number"]
+                law_yr   = cit["law_year"]
+                art_num  = cit["article_number"]
+                para_ltr = cit.get("paragraph_letter")
+                item_num = cit.get("item_number")
+                cit_txt  = cit.get("citation_text", "")
 
-                if cit["paragraph_letter"]:
-                    # Link to Paragraph (try amended first, fall back to 2015)
-                    para_amended = f"{law_id}_art_{cit['article_number']}_v_amended_p_{cit['paragraph_letter']}"
-                    para_2015 = f"{law_id}_art_{cit['article_number']}_v_2015_p_{cit['paragraph_letter']}"
-                    session.run(
-                        """
-                        MATCH (j:Judgment {ruling_id: $ruling_id})
-                        MATCH (p:Paragraph)
-                        WHERE p.paragraph_id = $para_amended
-                           OR p.paragraph_id = $para_2015
-                        MERGE (j)-[:CITES]->(p)
-                        """,
-                        ruling_id=judgment_data["ruling_id"],
-                        para_amended=para_amended,
-                        para_2015=para_2015,
-                    )
+                law_id = f"law_{law_num}_{law_yr}"
+
+                # CITES properties (stored on the edge)
+                edge_props = {
+                    "ruling_id":         judgment_data["ruling_id"],
+                    "citation_text":     cit_txt,
+                    "paragraph_letter":  para_ltr,
+                    "item_number":       item_num,
+                    "law_name":          cit.get("law_name", ""),
+                }
+
+                if para_ltr and item_num is not None:
+                    # ── Most specific: link to Item ───────────────────────
+                    for v in ("amended", "2015"):
+                        item_id = f"{law_id}_art_{art_num}_v_{v}_p_{para_ltr}_i_{item_num}"
+                        session.run(
+                            """
+                            MATCH (j:Judgment {ruling_id: $ruling_id})
+                            MATCH (i:Item {item_id: $item_id})
+                            MERGE (j)-[r:CITES]->(i)
+                            SET r.citation_text    = $citation_text,
+                                r.paragraph_letter = $paragraph_letter,
+                                r.item_number      = $item_number,
+                                r.law_name         = $law_name
+                            """,
+                            ruling_id=edge_props["ruling_id"],
+                            item_id=item_id,
+                            citation_text=cit_txt,
+                            paragraph_letter=para_ltr,
+                            item_number=item_num,
+                            law_name=edge_props["law_name"],
+                        )
+
+                elif para_ltr:
+                    # ── Medium: link to Paragraph ─────────────────────────
+                    for v in ("amended", "2015"):
+                        para_id = f"{law_id}_art_{art_num}_v_{v}_p_{para_ltr}"
+                        session.run(
+                            """
+                            MATCH (j:Judgment {ruling_id: $ruling_id})
+                            MATCH (p:Paragraph {paragraph_id: $para_id})
+                            MERGE (j)-[r:CITES]->(p)
+                            SET r.citation_text    = $citation_text,
+                                r.paragraph_letter = $paragraph_letter,
+                                r.law_name         = $law_name
+                            """,
+                            ruling_id=edge_props["ruling_id"],
+                            para_id=para_id,
+                            citation_text=cit_txt,
+                            paragraph_letter=para_ltr,
+                            law_name=edge_props["law_name"],
+                        )
+
                 else:
-                    # Link to ArticleVersion (try amended first, fall back to 2015)
-                    av_amended = f"{law_id}_art_{cit['article_number']}_v_amended"
-                    av_2015 = f"{law_id}_art_{cit['article_number']}_v_2015"
-                    session.run(
-                        """
-                        MATCH (j:Judgment {ruling_id: $ruling_id})
-                        MATCH (av:ArticleVersion)
-                        WHERE av.version_id = $av_amended
-                           OR av.version_id = $av_2015
-                        MERGE (j)-[:CITES]->(av)
-                        """,
-                        ruling_id=judgment_data["ruling_id"],
-                        av_amended=av_amended,
-                        av_2015=av_2015,
-                    )
+                    # ── Least specific: link to ArticleVersion ────────────
+                    for v in ("amended", "2015"):
+                        av_id = f"{law_id}_art_{art_num}_v_{v}"
+                        session.run(
+                            """
+                            MATCH (j:Judgment {ruling_id: $ruling_id})
+                            MATCH (av:ArticleVersion {version_id: $av_id})
+                            MERGE (j)-[r:CITES]->(av)
+                            SET r.citation_text = $citation_text,
+                                r.law_name      = $law_name
+                            """,
+                            ruling_id=edge_props["ruling_id"],
+                            av_id=av_id,
+                            citation_text=cit_txt,
+                            law_name=edge_props["law_name"],
+                        )
 
     # ──────────────────────────────────────────────
     # LAZY-LOADING TREE QUERIES
@@ -412,12 +466,17 @@ class Neo4jModel:
                     i = rec["i"]
                     props = dict(i)
                     iid = props["item_id"]
+                    # Does this item have judgments citing it?
+                    cnt = session.run(
+                        "MATCH (j:Judgment)-[:CITES]->(i:Item {item_id: $iid}) RETURN count(j) AS c",
+                        iid=iid,
+                    ).single()["c"]
                     nodes.append({
                         "data": {
                             "id": iid,
                             "label": f"بند {props.get('number', '')}",
                             "type": "Item",
-                            "hasChildren": False,
+                            "hasChildren": cnt > 0,
                             "properties": props,
                         }
                     })
@@ -430,7 +489,7 @@ class Neo4jModel:
                         }
                     })
 
-                # Children: Judgments citing this paragraph
+                # Judgments citing this paragraph directly
                 result = session.run(
                     """
                     MATCH (j:Judgment)-[:CITES]->(p:Paragraph {paragraph_id: $node_id})
@@ -451,6 +510,41 @@ class Neo4jModel:
                             "hasChildren": False,
                             "properties": light_props,
                             "text": props.get("full_text", ""),
+                        }
+                    })
+                    edges.append({
+                        "data": {
+                            "id": f"e_{jid}__{node_id}",
+                            "source": jid,
+                            "target": node_id,
+                            "label": "CITES",
+                        }
+                    })
+
+            elif node_type == "Item":
+                # Judgments citing this specific item/bund
+                result = session.run(
+                    """
+                    MATCH (j:Judgment)-[r:CITES]->(i:Item {item_id: $node_id})
+                    RETURN j, r
+                    """,
+                    node_id=node_id,
+                )
+                for rec in result:
+                    j    = rec["j"]
+                    r    = rec["r"]
+                    props = dict(j)
+                    jid   = props["ruling_id"]
+                    light_props = {k: v for k, v in props.items() if k != "full_text"}
+                    nodes.append({
+                        "data": {
+                            "id": jid,
+                            "label": f"حكم {props.get('case_number', jid)}",
+                            "type": "Judgment",
+                            "hasChildren": False,
+                            "properties": light_props,
+                            "text": props.get("full_text", ""),
+                            "citation_text": dict(r).get("citation_text", ""),
                         }
                     })
                     edges.append({
