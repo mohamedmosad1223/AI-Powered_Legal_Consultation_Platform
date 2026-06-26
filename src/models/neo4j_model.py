@@ -653,3 +653,77 @@ class Neo4jModel:
                 versions.append(props)
         return versions
 
+    def get_judgments_for_paragraph(self, paragraph_id: str) -> list[dict]:
+        """
+        Returns all Judgment nodes citing this specific paragraph,
+        its parent article version, or any of its child items.
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (p:Paragraph {paragraph_id: $paragraph_id})
+                MATCH (av:ArticleVersion {version_id: p.article_version_id})
+                OPTIONAL MATCH (j:Judgment)-[r:CITES]->(n)
+                WHERE n = p 
+                   OR n = av 
+                   OR (n:Item AND (p)-[:HAS_ITEM]->(n))
+                WITH DISTINCT j, r
+                WHERE j IS NOT NULL
+                RETURN j, r.citation_text AS citation_text
+                ORDER BY j.ruling_year, j.ruling_number
+                """,
+                paragraph_id=paragraph_id
+            )
+            judgments = []
+            for rec in result:
+                props = dict(rec["j"])
+                rid = props.get("ruling_id")
+                citation = rec["citation_text"] or ""
+                
+                existing = next((item for item in judgments if item["ruling_id"] == rid), None)
+                if existing:
+                    if citation and citation not in existing["citation_text"]:
+                        existing["citation_text"] += "\n" + citation
+                else:
+                    props["citation_text"] = citation
+                    judgments.append(props)
+        return judgments
+
+    def get_judgments_for_item(self, item_id: str) -> list[dict]:
+        """
+        Returns all Judgment nodes citing this specific item,
+        its parent paragraph, or its grandparent article version.
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (i:Item {item_id: $item_id})
+                MATCH (p:Paragraph)-[:HAS_ITEM]->(i)
+                MATCH (av:ArticleVersion {version_id: p.article_version_id})
+                OPTIONAL MATCH (j:Judgment)-[r:CITES]->(n)
+                WHERE n = i 
+                   OR n = p 
+                   OR n = av
+                WITH DISTINCT j, r
+                WHERE j IS NOT NULL
+                RETURN j, r.citation_text AS citation_text
+                ORDER BY j.ruling_year, j.ruling_number
+                """,
+                item_id=item_id
+            )
+            judgments = []
+            for rec in result:
+                props = dict(rec["j"])
+                rid = props.get("ruling_id")
+                citation = rec["citation_text"] or ""
+                
+                existing = next((item for item in judgments if item["ruling_id"] == rid), None)
+                if existing:
+                    if citation and citation not in existing["citation_text"]:
+                        existing["citation_text"] += "\n" + citation
+                else:
+                    props["citation_text"] = citation
+                    judgments.append(props)
+        return judgments
+
+

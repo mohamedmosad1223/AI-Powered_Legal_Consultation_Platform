@@ -33,19 +33,58 @@ class RAGController:
     @staticmethod
     def _parse_source_id(source_id: str) -> dict:
         """
-        Parses a source_id like 'law_34_2014_art_5_v_2015'
-        Returns dict with law_id, article_number, version_name.
+        Parses:
+        - ArticleVersion: 'law_34_2014_art_5_v_amended'
+        - Paragraph:      'law_34_2014_art_5_v_amended_p_أ'
+        - Item:           'law_34_2014_art_5_v_amended_p_أ_i_1'
+        Returns dict with:
+          law_id, article_number, version_name, paragraph_letter, item_number, type
         """
-        m = re.match(
-            r"(?P<law_id>law_\d+_\d+)_art_(?P<art_num>\d+)_v_(?P<version>.+)",
+        # 1. Match Item
+        m_item = re.match(
+            r"(?P<law_id>law_\d+_\d+)_art_(?P<art_num>\d+)_v_(?P<version>[^_]+)_p_(?P<para>[^_]+)_i_(?P<item>\d+)",
             source_id
         )
-        if m:
+        if m_item:
             return {
-                "law_id": m.group("law_id"),
-                "article_number": int(m.group("art_num")),
-                "version_name": m.group("version"),
+                "law_id": m_item.group("law_id"),
+                "article_number": int(m_item.group("art_num")),
+                "version_name": m_item.group("version"),
+                "paragraph_letter": m_item.group("para"),
+                "item_number": int(m_item.group("item")),
+                "type": "Item"
             }
+            
+        # 2. Match Paragraph
+        m_para = re.match(
+            r"(?P<law_id>law_\d+_\d+)_art_(?P<art_num>\d+)_v_(?P<version>[^_]+)_p_(?P<para>[^_]+)",
+            source_id
+        )
+        if m_para:
+            return {
+                "law_id": m_para.group("law_id"),
+                "article_number": int(m_para.group("art_num")),
+                "version_name": m_para.group("version"),
+                "paragraph_letter": m_para.group("para"),
+                "item_number": None,
+                "type": "Paragraph"
+            }
+            
+        # 3. Match ArticleVersion
+        m_av = re.match(
+            r"(?P<law_id>law_\d+_\d+)_art_(?P<art_num>\d+)_v_(?P<version>[^_]+)",
+            source_id
+        )
+        if m_av:
+            return {
+                "law_id": m_av.group("law_id"),
+                "article_number": int(m_av.group("art_num")),
+                "version_name": m_av.group("version"),
+                "paragraph_letter": None,
+                "item_number": None,
+                "type": "ArticleVersion"
+            }
+            
         return {}
 
     def _compare_versions(self, text_2015: str, text_amended: str) -> dict:
@@ -205,42 +244,62 @@ class RAGController:
             text      = payload.get("text", "")
 
             print(f"\n  - نتيجة #{idx}: [نوع: {node_type}] | [تطابق: {(res['score']*100):.1f}%] | [{source_id}]")
+            # Print a snippet of the Qdrant node text
+            snippet = text.replace('\n', ' ')
+            if len(snippet) > 150:
+                snippet = snippet[:150] + "..."
+            print(f"    📄 النص المسترجع: {snippet}")
 
             version_info = None
+            parsed = self._parse_source_id(source_id)
 
-            if node_type == "ArticleVersion":
-                parsed = self._parse_source_id(source_id)
+            if node_type in ("ArticleVersion", "Paragraph", "Item") and parsed:
                 art_key = (parsed.get("law_id", ""), parsed.get("article_number", 0))
                 law_id  = parsed.get("law_id", "")
                 art_num = parsed.get("article_number", 0)
+                version_name = parsed.get("version_name", "")
 
-                source_version = parsed.get("version_name", "")
-                source_label = (
-                    f"مادة {art_num} "
-                    f"({VERSION_LABELS.get(source_version, source_version)})"
-                )
+                # Format source label
+                if node_type == "Item":
+                    source_label = f"المادة {art_num} فقرة {parsed.get('paragraph_letter')} بند {parsed.get('item_number')} ({VERSION_LABELS.get(version_name, version_name)})"
+                elif node_type == "Paragraph":
+                    if parsed.get('paragraph_letter') == "عام":
+                        source_label = f"المادة {art_num} ({VERSION_LABELS.get(version_name, version_name)})"
+                    else:
+                        source_label = f"المادة {art_num} فقرة {parsed.get('paragraph_letter')} ({VERSION_LABELS.get(version_name, version_name)})"
+                else:
+                    source_label = f"المادة {art_num} ({VERSION_LABELS.get(version_name, version_name)})"
 
                 # Version comparison (once per article)
                 if art_key not in compared_articles and law_id:
                     compared_articles.add(art_key)
                     print(f"    * جاري مقارنة إصدارات المادة {art_num}...")
-                    version_info = self._get_version_info_for_article(source_id)
+                    av_id = f"{law_id}_art_{art_num}_v_{version_name}"
+                    version_info = self._get_version_info_for_article(av_id)
                     if version_info:
                         print(f"    * نوع التغيير: {version_info['change_type_label']} | أحدث نسخة: {version_info['latest_version_label']}")
-                        # Use the latest version's text for LLM context
-                        if version_info["latest_version"] == "amended" and version_info["text_amended"]:
-                            text = version_info["text_amended"]
-                        elif version_info["text_2015"]:
-                            text = version_info["text_2015"]
+                        # If node is ArticleVersion (legacy), override text. Else just append diff summary.
+                        if node_type == "ArticleVersion":
+                            if version_info["latest_version"] == "amended" and version_info["text_amended"]:
+                                text = version_info["text_amended"]
+                            elif version_info["text_2015"]:
+                                text = version_info["text_2015"]
                         text += f"\n\n[ملاحظة]: {version_info['diff_summary']}"
 
-                    # ── Fetch full judgment details from Neo4j ──────────────
-                    print(f"    * جاري جلب الأحكام المرتبطة بالمادة {art_num}...")
+                    # ── Fetch specific judgment details from Neo4j ──────────────
+                    print(f"    * جاري جلب الأحكام المرتبطة بالـ {node_type}...")
                     try:
-                        raw_judgments = self.neo4j.get_judgments_for_article(law_id, art_num)
+                        if node_type == "Item":
+                            raw_judgments = self.neo4j.get_judgments_for_item(source_id)
+                        elif node_type == "Paragraph":
+                            raw_judgments = self.neo4j.get_judgments_for_paragraph(source_id)
+                        else:
+                            raw_judgments = self.neo4j.get_judgments_for_article(law_id, art_num)
+
                         print(f"    * تم العثور على {len(raw_judgments)} حكم مرتبط.")
                         for j in raw_judgments:
                             rid = j.get("ruling_id", "")
+                            print(f"      ⚖️ حكم مرتبط: [معرف: {rid}] | رقم القضية: {j.get('case_number')} | المحكمة: {j.get('court')} | النتيجة: {j.get('outcome')}")
                             if rid and rid not in seen_rulings:
                                 seen_rulings.add(rid)
                                 all_judgments.append(j)
@@ -288,7 +347,7 @@ class RAGController:
                 response_data = self.llm.generate_rag_response(user_question, context_docs, all_judgments)
                 answer = response_data.get("answer", "")
                 
-                # Match evaluations with judgments and filter relevant ones
+                # Match evaluations with judgments and keep all, marking relevance
                 eval_dict = {}
                 for item in response_data.get("judgments_relevance", []):
                     rid = item.get("ruling_id")
@@ -298,14 +357,21 @@ class RAGController:
                 for idx, j in enumerate(all_judgments, 1):
                     rid_key = f"J{idx}"
                     evaluation = eval_dict.get(rid_key)
-                    if evaluation and evaluation.get("is_relevant", False):
+                    if evaluation:
+                        j["is_relevant"] = evaluation.get("is_relevant", False)
                         j["relevance_explanation"] = evaluation.get("relevance_explanation", "")
-                        filtered_judgments.append(j)
+                    else:
+                        j["is_relevant"] = False
+                        j["relevance_explanation"] = "لم يحدد الذكاء الاصطناعي علاقة مباشرة لهذا الحكم بالسؤال."
+                    filtered_judgments.append(j)
             except Exception as e:
                 print(f"❌ خطأ في معالجة RAG الذكية للأحكام: {e}")
                 # Fallback to normal response and all judgments if RAG analysis fails
                 answer = self.llm.generate_response(user_question, context_docs)
-                filtered_judgments = all_judgments
+                for j in all_judgments:
+                    j["is_relevant"] = True
+                    j["relevance_explanation"] = "تم جلب هذا الحكم لارتباطه بالمادة القانونية المسترجعة."
+                    filtered_judgments.append(j)
         else:
             answer = self.llm.generate_response(user_question, context_docs)
             

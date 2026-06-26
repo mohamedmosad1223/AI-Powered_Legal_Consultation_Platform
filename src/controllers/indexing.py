@@ -17,7 +17,7 @@ class IndexingController:
 
     def run_indexing(self):
         """
-        Reads ArticleVersions and Judgments from Neo4j,
+        Reads Paragraphs, Items and Judgments from Neo4j,
         embeds them using Cohere, and stores them in Qdrant.
         """
         if not self.embedder.client:
@@ -26,28 +26,95 @@ class IndexingController:
 
         print("Starting indexing process...")
         
-        # 1. Index Article Versions
-        print("Fetching ArticleVersions from Neo4j...")
-        articles = []
+        # 1. Index Paragraphs
+        print("Fetching Paragraphs from Neo4j...")
+        paragraphs = []
         with self.neo4j.driver.session() as session:
-            result = session.run("MATCH (av:ArticleVersion) RETURN av")
+            result = session.run(
+                """
+                MATCH (av:ArticleVersion)-[:HAS_PARAGRAPH]->(p:Paragraph)
+                OPTIONAL MATCH (p)-[:HAS_ITEM]->(i:Item)
+                WITH p, av.number AS art_num, i
+                ORDER BY i.number
+                RETURN p, art_num, collect(i) AS items
+                """
+            )
             for record in result:
-                av = record["av"]
-                props = dict(av)
-                if "text" in props and props["text"].strip():
-                    articles.append({
-                        "id": props["version_id"],
-                        "text": f"المادة {props.get('number', '')}:\n{props['text']}",
-                        "type": "ArticleVersion",
+                p = record["p"]
+                art_num = record["art_num"]
+                items = [item for item in record["items"] if item is not None]
+                props = dict(p)
+                p_text = props.get("text", "").strip()
+                p_letter = props.get("letter", "")
+                
+                # Append items if they exist
+                if items:
+                    items_list = []
+                    for item in items:
+                        item_props = dict(item)
+                        item_num = item_props.get("number")
+                        item_text = item_props.get("text", "").strip()
+                        if item_text:
+                            items_list.append(f"{item_num}- {item_text}")
+                    if items_list:
+                        p_text += "\n" + "\n".join(items_list)
+                
+                if p_text:
+                    if p_letter == "عام":
+                        text_to_embed = f"المادة {art_num}:\n{p_text}"
+                    else:
+                        text_to_embed = f"المادة {art_num} فقرة {p_letter}:\n{p_text}"
+                        
+                    paragraphs.append({
+                        "id": props["paragraph_id"],
+                        "text": text_to_embed,
+                        "type": "Paragraph",
                         "metadata": {
-                            "law_version_id": props.get("law_version_id", ""),
-                            "number": props.get("number", "")
+                            "article_number": art_num,
+                            "letter": p_letter
                         }
                     })
 
-        self._batch_index(articles, "ArticleVersions")
+        self._batch_index(paragraphs, "Paragraphs")
 
-        # 2. Index Judgments
+        # 2. Index Items
+        print("Fetching Items from Neo4j...")
+        items = []
+        with self.neo4j.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (av:ArticleVersion)-[:HAS_PARAGRAPH]->(p:Paragraph)-[:HAS_ITEM]->(i:Item)
+                RETURN i, p.letter AS para_letter, av.number AS art_num
+                """
+            )
+            for record in result:
+                i = record["i"]
+                para_letter = record["para_letter"]
+                art_num = record["art_num"]
+                props = dict(i)
+                i_text = props.get("text", "").strip()
+                i_num = props.get("number")
+                
+                if i_text:
+                    if para_letter == "عام":
+                        text_to_embed = f"المادة {art_num} بند {i_num}:\n{i_text}"
+                    else:
+                        text_to_embed = f"المادة {art_num} فقرة {para_letter} بند {i_num}:\n{i_text}"
+                        
+                    items.append({
+                        "id": props["item_id"],
+                        "text": text_to_embed,
+                        "type": "Item",
+                        "metadata": {
+                            "article_number": art_num,
+                            "paragraph_letter": para_letter,
+                            "number": i_num
+                        }
+                    })
+
+        self._batch_index(items, "Items")
+
+        # 3. Index Judgments
         print("Fetching Judgments from Neo4j...")
         judgments = []
         with self.neo4j.driver.session() as session:
