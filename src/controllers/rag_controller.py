@@ -214,8 +214,21 @@ class RAGController:
         # 2. Retrieve from Qdrant
         print("[الخطوة 3] جاري البحث في قاعدة البيانات المتجهة (Qdrant) عن أقرب النصوص...")
         try:
-            search_results = self.vector_store.search(query_emb, limit=5)
-            print(f"✅ تم العثور على {len(search_results)} نتيجة من Qdrant.")
+            # Retrieve 15 items to allow for deduplication of chunks from the same source
+            raw_search_results = self.vector_store.search(query_emb, limit=15)
+            
+            # Deduplicate by source_id to prevent redundant chunks from the same document (like judgment chunks)
+            seen_sources = set()
+            search_results = []
+            for res in raw_search_results:
+                source_id = res["payload"].get("source_id", "")
+                if source_id not in seen_sources:
+                    seen_sources.add(source_id)
+                    search_results.append(res)
+            
+            # Keep only the top 5 unique results
+            search_results = search_results[:5]
+            print(f"✅ تم العثور على {len(search_results)} نتيجة فريدة من Qdrant بعد إلغاء التكرار.")
         except Exception as e:
             print(f"❌ خطأ في البحث: {str(e)}")
             return {"answer": f"خطأ في البحث عن المعلومات: {str(e)}", "sources": []}
@@ -321,6 +334,29 @@ class RAGController:
                 "version_info": version_info,
             })
 
+        # 3.5. Filter Judgments based on semantic similarity using Qdrant (threshold 60%)
+        filtered_by_score = []
+        if all_judgments:
+            print("\n[الخطوة 4.5] جاري قياس التطابق الدلالي للأحكام المسترجعة وتصفيتها (حد القبول 60%)...")
+            for j in all_judgments:
+                rid = j.get("ruling_id", "")
+                try:
+                    q_res = self.vector_store.search(query_emb, limit=1, filter_dict={"source_id": rid})
+                    if q_res:
+                        score = q_res[0]["score"]
+                        print(f"      * سكور التشابه للحكم [{rid}]: {score*100:.1f}%")
+                        if score >= 0.60:
+                            j["similarity_score"] = score
+                            print(f"        ✅ تم قبول الحكم (تطابق >= 60%)")
+                            filtered_by_score.append(j)
+                        else:
+                            print(f"        ❌ تم استبعاد الحكم لتطابقه الضعيف (أقل من 60%)")
+                    else:
+                        print(f"      * تحذير: لم يتم العثور على حكم [{rid}] في Qdrant لقياس تشابهه. تم استبعاده.")
+                except Exception as e:
+                    print(f"      * خطأ أثناء قياس تشابه الحكم [{rid}]: {e}. تم استبعاده.")
+            all_judgments = filtered_by_score
+
         # 4. Build LLM context — include judgment summaries
         judgments_context = ""
         if all_judgments:
@@ -363,7 +399,10 @@ class RAGController:
                     else:
                         j["is_relevant"] = False
                         j["relevance_explanation"] = "لم يحدد الذكاء الاصطناعي علاقة مباشرة لهذا الحكم بالسؤال."
-                    filtered_judgments.append(j)
+                    
+                    # Only show judgment in UI if it is actually relevant
+                    if j["is_relevant"]:
+                        filtered_judgments.append(j)
             except Exception as e:
                 print(f"❌ خطأ في معالجة RAG الذكية للأحكام: {e}")
                 # Fallback to normal response and all judgments if RAG analysis fails

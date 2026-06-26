@@ -123,19 +123,35 @@ class IndexingController:
                 j = record["j"]
                 props = dict(j)
                 if "full_text" in props and props["full_text"].strip():
-                    judgments.append({
-                        "id": props["ruling_id"],
-                        "text": f"حكم رقم {props.get('case_number', '')} المحكمة {props.get('court', '')}:\n{props['full_text'][:2000]}...", # Truncate long judgments for embedding
-                        "type": "Judgment",
-                        "metadata": {
-                            "case_number": props.get("case_number", ""),
-                            "court": props.get("court", ""),
-                            "date": props.get("date", "")
-                        }
-                    })
+                    full_text = props["full_text"].strip()
+                    # Split the full text into chunks
+                    chunks = self._chunk_text(full_text, chunk_size=1000, overlap=200)
+                    for idx, chunk in enumerate(chunks):
+                        chunk_text_with_header = f"حكم رقم {props.get('case_number', '')} المحكمة {props.get('court', '')} (جزء {idx+1}):\n{chunk}"
+                        judgments.append({
+                            "id": f"{props['ruling_id']}_chunk_{idx}",
+                            "source_id": props["ruling_id"],
+                            "text": chunk_text_with_header,
+                            "type": "Judgment",
+                            "metadata": {
+                                "case_number": props.get("case_number", ""),
+                                "court": props.get("court", ""),
+                                "date": props.get("date", "")
+                            }
+                        })
 
         self._batch_index(judgments, "Judgments")
         print("Indexing completed successfully!")
+
+    def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
+        chunks = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            end = start + chunk_size
+            chunks.append(text[start:end])
+            start += chunk_size - overlap
+        return chunks
 
     def _batch_index(self, items: list[dict], name: str, batch_size: int = 50):
         if not items:
@@ -150,7 +166,7 @@ class IndexingController:
             payloads = [
                 {
                     "node_type": item["type"],
-                    "source_id": item["id"],
+                    "source_id": item.get("source_id", item["id"]),
                     "text": item["text"],
                     "metadata": item["metadata"]
                 }
